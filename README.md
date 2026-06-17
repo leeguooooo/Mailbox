@@ -171,3 +171,6 @@ openclaw skills check
 ## Contract
 
 - `docs/CLI_JSON_CONTRACT.md`
+---
+
+> Built by **leeguooooo** — field notes on AI agents, reverse engineering & Cloudflare Workers at **[blog.misonote.com](https://blog.misonote.com)** · follow on **[X @leeguooooo](https://x.com/leeguooooo)**
