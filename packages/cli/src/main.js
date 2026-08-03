@@ -488,6 +488,53 @@ function _readBodyFile(bodyFilePath) {
   return fs.readFileSync(bodyFilePath, "utf8");
 }
 
+function _collectOption(value, previous) {
+  return [...(previous || []), value];
+}
+
+function _resolveLocalAttachments(values) {
+  const files = Array.isArray(values) ? values : [];
+  return files.map((raw) => {
+    const input = String(raw || "").trim();
+    if (!input) throw new Error("--attachment path cannot be empty");
+    const filePath = path.resolve(process.cwd(), input);
+    let st;
+    try {
+      st = fs.statSync(filePath);
+    } catch {
+      throw new Error(`--attachment not found: ${input}`);
+    }
+    if (!st.isFile()) throw new Error(`--attachment is not a file: ${input}`);
+    return {
+      filename: path.basename(filePath),
+      path: filePath,
+      size_bytes: st.size,
+    };
+  });
+}
+
+function _attachmentPreview(attachments) {
+  return (attachments || []).map((a) => ({
+    filename: a.filename,
+    path: a.path,
+    size_bytes: a.size_bytes,
+  }));
+}
+
+function _mailAttachments(attachments) {
+  return (attachments || []).map((a) => ({
+    filename: a.filename,
+    path: a.path,
+  }));
+}
+
+function _explicitOptionValue(cmd, opts, key) {
+  if (cmd && typeof cmd.getOptionValueSource === "function" && cmd.getOptionValueSource(key) === "cli") {
+    return opts[key];
+  }
+  return undefined;
+}
+
 // Cooperative shutdown for foreground daemons. SIGINT/SIGTERM flips the flag
 // and resolves any in-flight wait so the loop can finish its current pass
 // (e.g. mid-flush sqlite write) before exiting.
@@ -1157,6 +1204,7 @@ async function main(argv) {
     .option("--body-file <path>")
     .option("--cc <cc...>")
     .option("--bcc <bcc...>")
+    .option("--attachment <path>", "Attach a local file; repeat for multiple files", _collectOption, [])
     .option("--account-id <id>")
     .option("--is-html")
     .option("--confirm", "Actually send (default: dry-run)")
@@ -1178,6 +1226,13 @@ async function main(argv) {
           process.exit(rc);
         }
       }
+      let attachments;
+      try {
+        attachments = _resolveLocalAttachments(opts.attachment);
+      } catch (e) {
+        const rc = contract.invalidUsage({ message: e && e.message ? e.message : "Failed to read attachment", asJson, pretty });
+        process.exit(rc);
+      }
       const dryRun = Boolean(opts.dryRun) || !Boolean(opts.confirm);
       if (dryRun) {
         const result = {
@@ -1192,6 +1247,8 @@ async function main(argv) {
             is_html: Boolean(opts.isHtml),
             body_bytes: Buffer.byteLength(body, "utf8"),
             body_preview: body.slice(0, 200),
+            attachment_count: attachments.length,
+            attachments: _attachmentPreview(attachments),
           },
           confirmation_required: true,
           confirmation_hint: "Re-run with --confirm to actually send",
@@ -1207,6 +1264,7 @@ async function main(argv) {
         bcc: opts.bcc,
         account_id: opts.accountId || "",
         is_html: Boolean(opts.isHtml),
+        attachments: _mailAttachments(attachments),
       });
       const rc = contract.handleJsonOrText({ result, asJson, pretty, printText: () => _printTextNotImplemented("email send") });
       process.exit(rc);
@@ -1220,9 +1278,12 @@ async function main(argv) {
     .option("--body-file <path>")
     .option("--reply-all")
     .option("--folder <name>", "Folder", "INBOX")
+    .option("--attachment <path>", "Attach a local file; repeat for multiple files", _collectOption, [])
     .option("--account-id <id>")
     .option("--is-html")
-    .action(async (emailId, opts) => {
+    .option("--confirm", "Actually send (default: dry-run)")
+    .option("--dry-run")
+    .action(async (emailId, opts, cmd) => {
       const hasBody = typeof opts.body === "string" && opts.body.length;
       const hasBodyFile = Boolean(opts.bodyFile);
       if ((hasBody && hasBodyFile) || (!hasBody && !hasBodyFile)) {
@@ -1239,13 +1300,25 @@ async function main(argv) {
           process.exit(rc);
         }
       }
+      let attachments;
+      try {
+        attachments = _resolveLocalAttachments(opts.attachment);
+      } catch (e) {
+        const rc = contract.invalidUsage({ message: e && e.message ? e.message : "Failed to read attachment", asJson, pretty });
+        process.exit(rc);
+      }
+      const dryRun = Boolean(opts.dryRun) || !Boolean(opts.confirm);
+      const ref = _parseEmailRef(emailId);
+      const explicitFolder = _explicitOptionValue(cmd, opts, "folder");
       const result = await email.replyEmail({
-        email_id: emailId,
+        email_id: ref.id,
         body,
         reply_all: Boolean(opts.replyAll),
-        folder: opts.folder,
-        account_id: opts.accountId || "",
+        folder: explicitFolder || ref.folder || opts.folder,
+        account_id: opts.accountId || ref.account_id || "",
         is_html: Boolean(opts.isHtml),
+        attachments: _mailAttachments(attachments),
+        dry_run: dryRun,
       });
       const rc = contract.handleJsonOrText({ result, asJson, pretty, printText: () => _printTextNotImplemented("email reply") });
       process.exit(rc);
@@ -1260,14 +1333,20 @@ async function main(argv) {
     .option("--folder <name>", "Folder", "INBOX")
     .option("--no-attachments")
     .option("--account-id <id>")
-    .action(async (emailId, opts) => {
+    .option("--confirm", "Actually send (default: dry-run)")
+    .option("--dry-run")
+    .action(async (emailId, opts, cmd) => {
+      const dryRun = Boolean(opts.dryRun) || !Boolean(opts.confirm);
+      const ref = _parseEmailRef(emailId);
+      const explicitFolder = _explicitOptionValue(cmd, opts, "folder");
       const result = await email.forwardEmail({
-        email_id: emailId,
+        email_id: ref.id,
         to: opts.to,
         body: opts.body || "",
-        folder: opts.folder,
+        folder: explicitFolder || ref.folder || opts.folder,
         no_attachments: Boolean(opts.noAttachments),
-        account_id: opts.accountId || "",
+        account_id: opts.accountId || ref.account_id || "",
+        dry_run: dryRun,
       });
       const rc = contract.handleJsonOrText({ result, asJson, pretty, printText: () => _printTextNotImplemented("email forward") });
       process.exit(rc);

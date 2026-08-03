@@ -1507,7 +1507,20 @@ async function deleteEmails({ email_ids, folder = "INBOX", permanent = false, tr
   });
 }
 
-async function sendEmail({ to, subject, body, cc, bcc, account_id = "", is_html = false } = {}) {
+function _outgoingAttachments(attachments) {
+  if (!attachments) return [];
+  return Array.isArray(attachments) ? attachments.filter(Boolean) : [attachments];
+}
+
+function _outgoingAttachmentPreview(attachments) {
+  return _outgoingAttachments(attachments).map((a) => ({
+    filename: a.filename || (a.path ? path.basename(String(a.path)) : "attachment"),
+    path: a.path || undefined,
+    content_type: a.contentType || undefined,
+  }));
+}
+
+async function sendEmail({ to, subject, body, cc, bcc, account_id = "", is_html = false, attachments = [] } = {}) {
   const tos = Array.isArray(to) ? to : [to];
   const recipients = tos.map((x) => String(x)).filter((x) => x.trim());
   if (!recipients.length) return { success: false, error: "Missing --to" };
@@ -1518,6 +1531,7 @@ async function sendEmail({ to, subject, body, cc, bcc, account_id = "", is_html 
   if (!acc.success) return acc;
 
   try {
+    const outgoingAttachments = _outgoingAttachments(attachments);
     const r = await sendMail({
       account: acc.account,
       to: recipients.join(", "),
@@ -1526,6 +1540,7 @@ async function sendEmail({ to, subject, body, cc, bcc, account_id = "", is_html 
       subject: subj,
       text: is_html ? "" : String(body || ""),
       html: is_html ? String(body || "") : "",
+      attachments: outgoingAttachments,
     });
 
     if (!r.success) return r;
@@ -1534,6 +1549,7 @@ async function sendEmail({ to, subject, body, cc, bcc, account_id = "", is_html 
       message: `Email sent successfully to ${recipients.length} recipient(s)`,
       recipients,
       from: acc.account.email,
+      attachment_count: outgoingAttachments.length,
     };
   } catch (e) {
     return { success: false, error: e && e.message ? e.message : "send failed", from: acc.account.email };
@@ -1579,11 +1595,12 @@ function _buildReferences(detail) {
   return refs.join(" ").trim();
 }
 
-async function replyEmail({ email_id, body, reply_all = false, folder = "INBOX", account_id = "", is_html = false } = {}) {
+async function replyEmail({ email_id, body, reply_all = false, folder = "INBOX", account_id = "", is_html = false, attachments = [], dry_run = false } = {}) {
   const detail = await showEmail({ email_id, folder, account_id });
   if (!detail.success) return detail;
   const acc = accounts.getAccountByIdOrEmail(account_id);
   if (!acc.success) return acc;
+  const outgoingAttachments = _outgoingAttachments(attachments);
 
   const fromAddr = detail.from || "";
   let toList = [fromAddr].filter(Boolean);
@@ -1605,6 +1622,28 @@ async function replyEmail({ email_id, body, reply_all = false, folder = "INBOX",
   const refs = _buildReferences(detail);
   if (refs) headers.References = refs;
 
+  if (dry_run) {
+    return {
+      success: true,
+      dry_run: true,
+      would_reply: {
+        email_id: String(email_id || ""),
+        folder,
+        account_id: acc.account.id,
+        to: toList,
+        cc: ccList,
+        subject,
+        is_html: Boolean(is_html),
+        body_bytes: Buffer.byteLength(String(body || ""), "utf8"),
+        body_preview: String(body || "").slice(0, 200),
+        attachment_count: outgoingAttachments.length,
+        attachments: _outgoingAttachmentPreview(outgoingAttachments),
+      },
+      confirmation_required: true,
+      confirmation_hint: "Re-run with --confirm to actually send",
+    };
+  }
+
   try {
     await sendMail({
       account: acc.account,
@@ -1613,6 +1652,7 @@ async function replyEmail({ email_id, body, reply_all = false, folder = "INBOX",
       subject,
       text: is_html ? "" : String(body || ""),
       html: is_html ? String(body || "") : "",
+      attachments: outgoingAttachments,
       headers,
     });
     return {
@@ -1621,13 +1661,14 @@ async function replyEmail({ email_id, body, reply_all = false, folder = "INBOX",
       recipients: toList,
       cc: ccList,
       from: acc.account.email,
+      attachment_count: outgoingAttachments.length,
     };
   } catch (e) {
     return { success: false, error: e && e.message ? e.message : "reply failed", from: acc.account.email };
   }
 }
 
-async function forwardEmail({ email_id, to, body = "", folder = "INBOX", no_attachments = false, account_id = "" } = {}) {
+async function forwardEmail({ email_id, to, body = "", folder = "INBOX", no_attachments = false, account_id = "", dry_run = false } = {}) {
   const detail = await showEmail({ email_id, folder, account_id });
   if (!detail.success) return detail;
   const acc = accounts.getAccountByIdOrEmail(account_id);
@@ -1635,6 +1676,28 @@ async function forwardEmail({ email_id, to, body = "", folder = "INBOX", no_atta
 
   const recipients = (Array.isArray(to) ? to : [to]).map((x) => String(x)).filter((x) => x.trim());
   if (!recipients.length) return { success: false, error: "Missing --to" };
+  const subject = `Fwd: ${detail.subject || ""}`;
+
+  if (dry_run) {
+    const originalAttachmentCount = no_attachments ? 0 : (detail.real_attachment_count || detail.attachment_count || 0);
+    return {
+      success: true,
+      dry_run: true,
+      would_forward: {
+        email_id: String(email_id || ""),
+        folder,
+        account_id: acc.account.id,
+        to: recipients,
+        subject,
+        body_bytes: Buffer.byteLength(String(body || ""), "utf8"),
+        body_preview: String(body || "").slice(0, 200),
+        include_original_attachments: !no_attachments,
+        original_attachment_count: originalAttachmentCount,
+      },
+      confirmation_required: true,
+      confirmation_hint: "Re-run with --confirm to actually send",
+    };
+  }
 
   let attachments = [];
   if (!no_attachments && detail.attachment_count) {
@@ -1678,7 +1741,7 @@ async function forwardEmail({ email_id, to, body = "", folder = "INBOX", no_atta
     await sendMail({
       account: acc.account,
       to: recipients.join(", "),
-      subject: `Fwd: ${detail.subject || ""}`,
+      subject,
       text: String(body || ""),
       attachments,
     });
@@ -1687,6 +1750,7 @@ async function forwardEmail({ email_id, to, body = "", folder = "INBOX", no_atta
       message: `Email sent successfully to ${recipients.length} recipient(s)`,
       recipients,
       from: acc.account.email,
+      attachment_count: attachments.length,
     };
   } catch (e) {
     return { success: false, error: e && e.message ? e.message : "forward failed", from: acc.account.email };

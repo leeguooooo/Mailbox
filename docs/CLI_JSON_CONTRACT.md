@@ -242,12 +242,81 @@ Batch or single:
 ```
 
 ### email send / reply / forward
+Default dry-run for send:
+```json
+{
+  "success": true,
+  "dry_run": true,
+  "would_send": {
+    "to": ["a@example.com"],
+    "cc": [],
+    "bcc": [],
+    "subject": "Hello",
+    "account_id": "acc_id",
+    "is_html": false,
+    "body_bytes": 42,
+    "body_preview": "message preview",
+    "attachment_count": 1,
+    "attachments": [
+      { "filename": "quote.txt", "path": "/path/to/quote.txt", "size_bytes": 1234 }
+    ]
+  },
+  "confirmation_required": true,
+  "confirmation_hint": "Re-run with --confirm to actually send"
+}
+```
+Default dry-run for reply:
+```json
+{
+  "success": true,
+  "dry_run": true,
+  "would_reply": {
+    "email_id": "123",
+    "folder": "INBOX",
+    "account_id": "acc_id",
+    "to": ["sender@example.com"],
+    "cc": [],
+    "subject": "Re: Hello",
+    "is_html": false,
+    "body_bytes": 42,
+    "body_preview": "message preview",
+    "attachment_count": 1,
+    "attachments": [
+      { "filename": "reply.txt", "path": "/path/to/reply.txt", "content_type": "text/plain" }
+    ]
+  },
+  "confirmation_required": true,
+  "confirmation_hint": "Re-run with --confirm to actually send"
+}
+```
+Default dry-run for forward:
+```json
+{
+  "success": true,
+  "dry_run": true,
+  "would_forward": {
+    "email_id": "123",
+    "folder": "INBOX",
+    "account_id": "acc_id",
+    "to": ["a@example.com"],
+    "subject": "Fwd: Hello",
+    "body_bytes": 42,
+    "body_preview": "message preview",
+    "include_original_attachments": true,
+    "original_attachment_count": 1
+  },
+  "confirmation_required": true,
+  "confirmation_hint": "Re-run with --confirm to actually send"
+}
+```
+Confirmed send/reply/forward:
 ```json
 {
   "success": true,
   "message": "Email sent successfully to 2 recipient(s)",
   "recipients": ["a@example.com", "b@example.com"],
-  "from": "user@example.com"
+  "from": "user@example.com",
+  "attachment_count": 1
 }
 ```
 On error: `{"success": false, "error": "...", "from": "user@example.com"}`.

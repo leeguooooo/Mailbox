@@ -1,10 +1,13 @@
 // Regression tests for the 4 issues codex review surfaced and we just fixed.
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { execa } from "execa";
 import path from "node:path";
 import fs from "node:fs";
 
 import { defaultAuth, testEnv, writeAuthJson } from "./_helpers.mjs";
+
+const require = createRequire(import.meta.url);
 
 function tmpRoot(name) {
   return path.join(import.meta.dirname, ".tmp", name);
@@ -14,6 +17,87 @@ function mailboxBin() {
 }
 
 describe("Codex review fixes (regression)", () => {
+  it("outgoing attachment and new dry-run semantics bypass stale daemons", async () => {
+    const { _shouldBypassDaemonForCall } = require("../src/core_client.js");
+
+    expect(_shouldBypassDaemonForCall("email.sendEmail", {
+      attachments: [{ path: "/tmp/a.txt" }],
+    })).toBe(true);
+    expect(_shouldBypassDaemonForCall("email.sendEmail", {
+      attachments: [],
+    })).toBe(false);
+    expect(_shouldBypassDaemonForCall("email.replyEmail", {
+      dry_run: true,
+    })).toBe(true);
+    expect(_shouldBypassDaemonForCall("email.replyEmail", {
+      attachments: [{ path: "/tmp/a.txt" }],
+    })).toBe(true);
+    expect(_shouldBypassDaemonForCall("email.forwardEmail", {
+      dry_run: true,
+    })).toBe(true);
+    expect(_shouldBypassDaemonForCall("email.forwardEmail", {
+      dry_run: false,
+    })).toBe(false);
+  });
+
+  it("email reply lets explicit --folder override the gid folder", async () => {
+    const root = tmpRoot("reply_folder_override");
+    fs.rmSync(root, { recursive: true, force: true });
+    const env = testEnv(root);
+    writeAuthJson(env.MAILBOX_CONFIG_DIR, defaultAuth());
+
+    const r = await execa(
+      "node",
+      [mailboxBin(), "email", "reply", "mock_acc:Trash:101", "--folder", "INBOX", "--body", "Reply body", "--json"],
+      { reject: false, env }
+    );
+
+    expect(r.exitCode).toBe(0);
+    const payload = JSON.parse(r.stdout);
+    expect(payload).toHaveProperty("success", true);
+    expect(payload).toHaveProperty("dry_run", true);
+    expect(payload.would_reply).toMatchObject({
+      email_id: "101",
+      folder: "INBOX",
+      subject: "Re: Hello",
+    });
+  });
+
+  it("email forward lets explicit --folder override the gid folder", async () => {
+    const root = tmpRoot("forward_folder_override");
+    fs.rmSync(root, { recursive: true, force: true });
+    const env = testEnv(root);
+    writeAuthJson(env.MAILBOX_CONFIG_DIR, defaultAuth());
+
+    const r = await execa(
+      "node",
+      [
+        mailboxBin(),
+        "email",
+        "forward",
+        "mock_acc:Trash:102",
+        "--folder",
+        "INBOX",
+        "--to",
+        "person@example.com",
+        "--body",
+        "FYI",
+        "--json",
+      ],
+      { reject: false, env }
+    );
+
+    expect(r.exitCode).toBe(0);
+    const payload = JSON.parse(r.stdout);
+    expect(payload).toHaveProperty("success", true);
+    expect(payload).toHaveProperty("dry_run", true);
+    expect(payload.would_forward).toMatchObject({
+      email_id: "102",
+      folder: "INBOX",
+      subject: "Fwd: Unread Note",
+    });
+  });
+
   it("BUG-1a: email flag without --confirm is dry-run, doesn't mutate", async () => {
     const root = tmpRoot("flag_dry_run");
     fs.rmSync(root, { recursive: true, force: true });

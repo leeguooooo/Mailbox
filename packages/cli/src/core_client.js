@@ -160,6 +160,19 @@ const MUTATING_FNS = new Set([
   "cleanup.apply",
 ]);
 
+function _hasOutgoingAttachments(args) {
+  const attachments = args && args.attachments;
+  if (!attachments) return false;
+  return Array.isArray(attachments) ? attachments.length > 0 : true;
+}
+
+function _shouldBypassDaemonForCall(fullName, args) {
+  if (fullName === "email.sendEmail") return _hasOutgoingAttachments(args);
+  if (fullName === "email.replyEmail") return Boolean(args && args.dry_run === true) || _hasOutgoingAttachments(args);
+  if (fullName === "email.forwardEmail") return Boolean(args && args.dry_run === true);
+  return false;
+}
+
 function _wrapNamespace(nsName, realObj) {
   const handler = {
     get(_, fname) {
@@ -173,7 +186,7 @@ function _wrapNamespace(nsName, realObj) {
         const args = callArgs[0]; // every core fn takes a single options object
         const isMutator = MUTATING_FNS.has(fullName);
         const isDryRun = isMutator && args && (args.dry_run === true);
-        const client = await _maybeConnect();
+        const client = _shouldBypassDaemonForCall(fullName, args) ? null : await _maybeConnect();
         if (client) {
           try {
             return await client.call(fullName, args);
@@ -215,4 +228,4 @@ function makeProxies() {
   };
 }
 
-module.exports = { makeProxies };
+module.exports = { makeProxies, _shouldBypassDaemonForCall };

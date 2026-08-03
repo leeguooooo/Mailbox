@@ -218,6 +218,219 @@ describe("CLI JSON contract - MVP commands", () => {
     expect(payload).toHaveProperty("would_delete", 1);
   });
 
+  it("email send dry-run previews local attachments", async () => {
+    const root = tmpRoot("email_send_attachment_dry_run");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(root, { recursive: true });
+    const attachment = path.join(root, "quote.txt");
+    fs.writeFileSync(attachment, "attachment body", "utf8");
+
+    const env = testEnv(root);
+    writeAuthJson(env.MAILBOX_CONFIG_DIR, defaultAuth());
+
+    const r = await execa(
+      "node",
+      [
+        mailboxBin(),
+        "email",
+        "send",
+        "--to",
+        "person@example.com",
+        "--subject",
+        "Hello",
+        "--body",
+        "See attached",
+        "--attachment",
+        attachment,
+        "--json",
+      ],
+      {
+        reject: false,
+        env,
+      }
+    );
+
+    expect(r.exitCode).toBe(0);
+    const payload = JSON.parse(r.stdout);
+    expect(payload).toHaveProperty("success", true);
+    expect(payload).toHaveProperty("dry_run", true);
+    expect(payload.would_send).toHaveProperty("attachment_count", 1);
+    expect(payload.would_send.attachments[0]).toMatchObject({
+      filename: "quote.txt",
+      path: attachment,
+      size_bytes: Buffer.byteLength("attachment body"),
+    });
+  });
+
+  it("email send --confirm sends with local attachment metadata", async () => {
+    const root = tmpRoot("email_send_attachment_confirm");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(root, { recursive: true });
+    const attachment = path.join(root, "send-confirm.txt");
+    fs.writeFileSync(attachment, "send attachment", "utf8");
+
+    const env = testEnv(root);
+    writeAuthJson(env.MAILBOX_CONFIG_DIR, defaultAuth());
+
+    const r = await execa(
+      "node",
+      [
+        mailboxBin(),
+        "email",
+        "send",
+        "--to",
+        "person@example.com",
+        "--subject",
+        "Hello",
+        "--body",
+        "See attached",
+        "--attachment",
+        attachment,
+        "--account-id",
+        "mock_acc",
+        "--confirm",
+        "--json",
+      ],
+      {
+        reject: false,
+        env,
+      }
+    );
+
+    expect(r.exitCode).toBe(0);
+    const payload = JSON.parse(r.stdout);
+    expect(payload).toMatchObject({
+      success: true,
+      attachment_count: 1,
+    });
+  });
+
+  it("email reply dry-run previews recipients and local attachments", async () => {
+    const root = tmpRoot("email_reply_attachment_dry_run");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(root, { recursive: true });
+    const attachment = path.join(root, "reply.txt");
+    fs.writeFileSync(attachment, "reply attachment", "utf8");
+
+    const env = testEnv(root);
+    writeAuthJson(env.MAILBOX_CONFIG_DIR, defaultAuth());
+
+    const r = await execa(
+      "node",
+      [
+        mailboxBin(),
+        "email",
+        "reply",
+        "mock_acc:INBOX:101",
+        "--body",
+        "Reply body",
+        "--attachment",
+        attachment,
+        "--json",
+      ],
+      {
+        reject: false,
+        env,
+      }
+    );
+
+    expect(r.exitCode).toBe(0);
+    const payload = JSON.parse(r.stdout);
+    expect(payload).toHaveProperty("success", true);
+    expect(payload).toHaveProperty("dry_run", true);
+    expect(payload.would_reply).toMatchObject({
+      email_id: "101",
+      subject: "Re: Hello",
+      attachment_count: 1,
+    });
+    expect(payload.would_reply.to).toContain("sender@example.com");
+    expect(payload.would_reply.attachments[0]).toMatchObject({
+      filename: "reply.txt",
+      path: attachment,
+    });
+  });
+
+  it("email reply --confirm sends with local attachment metadata", async () => {
+    const root = tmpRoot("email_reply_attachment_confirm");
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(root, { recursive: true });
+    const attachment = path.join(root, "reply-confirm.txt");
+    fs.writeFileSync(attachment, "reply attachment", "utf8");
+
+    const env = testEnv(root);
+    writeAuthJson(env.MAILBOX_CONFIG_DIR, defaultAuth());
+
+    const r = await execa(
+      "node",
+      [
+        mailboxBin(),
+        "email",
+        "reply",
+        "101",
+        "--body",
+        "Reply body",
+        "--folder",
+        "INBOX",
+        "--account-id",
+        "mock_acc",
+        "--attachment",
+        attachment,
+        "--confirm",
+        "--json",
+      ],
+      {
+        reject: false,
+        env,
+      }
+    );
+
+    expect(r.exitCode).toBe(0);
+    const payload = JSON.parse(r.stdout);
+    expect(payload).toMatchObject({
+      success: true,
+      attachment_count: 1,
+    });
+  });
+
+  it("email forward defaults to dry-run until --confirm", async () => {
+    const root = tmpRoot("email_forward_dry_run");
+    fs.rmSync(root, { recursive: true, force: true });
+
+    const env = testEnv(root);
+    writeAuthJson(env.MAILBOX_CONFIG_DIR, defaultAuth());
+
+    const r = await execa(
+      "node",
+      [
+        mailboxBin(),
+        "email",
+        "forward",
+        "mock_acc:INBOX:102",
+        "--to",
+        "person@example.com",
+        "--body",
+        "FYI",
+        "--json",
+      ],
+      {
+        reject: false,
+        env,
+      }
+    );
+
+    expect(r.exitCode).toBe(0);
+    const payload = JSON.parse(r.stdout);
+    expect(payload).toHaveProperty("success", true);
+    expect(payload).toHaveProperty("dry_run", true);
+    expect(payload.would_forward).toMatchObject({
+      email_id: "102",
+      subject: "Fwd: Unread Note",
+      include_original_attachments: true,
+      original_attachment_count: 1,
+    });
+    expect(payload).toHaveProperty("confirmation_required", true);
+  });
+
   it("sync status returns scheduler fields", async () => {
     const root = tmpRoot("sync_status");
     fs.rmSync(root, { recursive: true, force: true });
