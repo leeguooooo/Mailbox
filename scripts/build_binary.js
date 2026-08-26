@@ -3,6 +3,8 @@
 const child_process = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { runMcpSmokeTest } = require("./mcp_smoke_test");
+const { buildPkgArgs } = require("./pkg_config");
 
 function platformPackage() {
   const platform = process.platform;
@@ -30,10 +32,10 @@ function run(cmd, args) {
 }
 
 function ensureBinary(entry, target, outBin, root) {
-  run("pnpm", ["-C", root, "exec", "pkg", entry, "--targets", target, "--output", outBin]);
+  run("pnpm", buildPkgArgs({ root, entry, target, output: outBin }));
   if (!fs.existsSync(outBin)) {
     console.warn(`pkg did not produce ${outBin}. Retrying once...`);
-    run("pnpm", ["-C", root, "exec", "pkg", entry, "--targets", target, "--output", outBin]);
+    run("pnpm", buildPkgArgs({ root, entry, target, output: outBin }));
   }
   if (!fs.existsSync(outBin)) {
     console.error(`pkg failed to produce ${outBin}`);
@@ -67,6 +69,8 @@ function main() {
   run("pnpm", ["-C", root, "install"]);
   run("pnpm", ["-C", root, "test"]);
   ensureBinary(entry, target, outBin, root);
+  const smoke = runMcpSmokeTest(outBin);
+  console.log(`MCP smoke test passed: ${smoke.toolCount} tools`);
 
   const platformPkgDir = path.join(__dirname, "..", "mailbox-cli", "packages", pkgName);
   const binDir = path.join(platformPkgDir, "bin");

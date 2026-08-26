@@ -4,6 +4,7 @@ const { Command } = require("commander");
 
 const { contract } = require("@mailbox/shared");
 const { makeProxies } = require("./core_client");
+const { buildMcpClientConfig } = require("./mcp_config");
 // All calls into core/workflows go through these proxies. When a mailbox
 // daemon is running, requests are forwarded over a Unix socket so we
 // reuse pooled IMAP connections (1-3s saved per call). When no daemon
@@ -1822,10 +1823,7 @@ async function main(argv) {
     .action(() => {
       const cfg = {
         mcpServers: {
-          mailbox: {
-            command: process.execPath,
-            args: [process.argv[1] || "mailbox", "mcp", "serve"],
-          },
+          mailbox: buildMcpClientConfig(),
         },
       };
       const result = { success: true, config: cfg, hint: "Add the mcpServers entry to your client's config (e.g. ~/Library/Application Support/Claude/claude_desktop_config.json on macOS)" };
