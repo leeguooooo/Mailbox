@@ -1820,11 +1820,15 @@ async function main(argv) {
     .command("config")
     .description("Print a sample MCP client config snippet for Claude Desktop / Code")
     .action(() => {
+      // #22：装机版是 pkg 单文件二进制，process.argv[1] 是 snapshot 内的虚拟路径
+      // （/snapshot/Mailbox/packages/cli/bin/mailbox.js），在用户机器上并不存在——照着这份
+      // config 配的客户端一定起不来。二进制里 execPath 就是 `mailbox` 自己，直接带子命令即可。
+      const packaged = process.pkg !== undefined;
       const cfg = {
         mcpServers: {
           mailbox: {
             command: process.execPath,
-            args: [process.argv[1] || "mailbox", "mcp", "serve"],
+            args: packaged ? ["mcp", "serve"] : [process.argv[1] || "mailbox", "mcp", "serve"],
           },
         },
       };
