@@ -64,6 +64,10 @@ pnpm test
 pnpm build:binary
 ```
 
+If a test run is interrupted (editor task killed, agent session closed), its
+Vitest workers can be left behind and hold memory. Check with
+`pgrep -fl vitest` and kill what remains.
+
 ## Configure accounts
 
 ```bash
