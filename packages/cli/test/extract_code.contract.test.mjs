@@ -38,6 +38,25 @@ describe("extractCodes (verification/OTP heuristic)", () => {
     expect(contract.extractCodes("")).toEqual([]);
     expect(contract.extractCodes("no codes here at all")).toEqual([]);
   });
+
+  // #26: a Japanese bank sent "・認証コード：vM8xw" and --extract-code returned
+  // null. Mixed-case alphanumeric codes are the norm at JP banks, Stripe and
+  // GitHub, so digit-only extraction quietly loses the code the agent came for.
+  it("pulls keyword-anchored alphanumeric codes (#26)", () => {
+    expect(contract.extractCodes("・認証コード：vM8xw")).toEqual(["vM8xw"]);
+    expect(contract.extractCodes("Your verification code is a1B2c3")).toEqual(["a1B2c3"]);
+    expect(contract.extractCodes("Your security code is 9f3K2a, valid 10 min")).toEqual(["9f3K2a"]);
+    expect(contract.extractCodes("ワンタイムパスワード：Ab12Cd")).toEqual(["Ab12Cd"]);
+    expect(contract.extractCodes("验证码：8k2Mx9")).toEqual(["8k2Mx9"]);
+    expect(contract.extractCodes("인증번호 x7Y2z1")).toEqual(["x7Y2z1"]);
+  });
+
+  it("does not turn prose after a code keyword into a code (#26)", () => {
+    // The keyword anchor alone is not enough — requiring a digit is what keeps
+    // ordinary words out. Both of these used to be the obvious failure mode.
+    expect(contract.extractCodes("code: please check your account")).toEqual([]);
+    expect(contract.extractCodes("Please read the code of conduct")).toEqual([]);
+  });
 });
 
 describe("email show --extract-code wires codes onto the result", () => {

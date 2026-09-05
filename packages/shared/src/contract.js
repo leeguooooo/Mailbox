@@ -293,6 +293,23 @@ function invalidUsage({ message, asJson, pretty }) {
 // shapes agents actually chase: bare 4–8 digit OTPs, and the prefixed
 // "LL-DDDDDD" form (e.g. "QB-046193", "G-1234"). De-duplicated, order-preserved.
 // Heuristic by design — a caller should still eyeball context for ambiguous mail.
+// Keywords that actually precede a one-time code, across the languages this
+// mailbox sees. Followed by an optional separator (":", "：", "=", "-", "は")
+// and whitespace, then the code itself.
+const _ALNUM_CODE_RE = new RegExp(
+  '(?:' +
+    'verification\\s+code|confirmation\\s+code|security\\s+code|one[- ]time\\s+(?:code|password)|' +
+    'passcode|pin\\s*code|access\\s+code|otp|code|pin|' +
+    '\\u8a8d\\u8a3c\\u30b3\\u30fc\\u30c9|\\u78ba\\u8a8d\\u30b3\\u30fc\\u30c9|\\u30ef\\u30f3\\u30bf\\u30a4\\u30e0\\u30d1\\u30b9\\u30ef\\u30fc\\u30c9|\\u30b3\\u30fc\\u30c9|\\u8a8d\\u8a3c\\u756a\\u53f7|' +
+    '\\u9a8c\\u8bc1\\u7801|\\u52a8\\u6001\\u7801|' +
+    '\\uc778\\uc99d\\ubc88\\ud638' +
+  ')' +
+  '(?:\\s+(?:is|are|was))?' +
+  '\\s*[:\\uff1a=\\-\\u306f]?\\s*' +
+  '([A-Za-z0-9]{4,8})(?![A-Za-z0-9])',
+  'gi',
+);
+
 function extractCodes(text) {
   const s = String(text || "");
   if (!s) return [];
@@ -319,6 +336,18 @@ function extractCodes(text) {
   // surfaced as the tail of a prefixed code so we don't double-report them.
   const bare = s.match(/(?<!\d)\d{4,8}(?!\d)/g) || [];
   for (const m of bare) if (!coveredDigits.has(m)) push(m);
+  // Mixed alphanumeric codes ("vM8xw", "a1B2c3"), which Japanese banks, Stripe
+  // and GitHub all use. These are far too word-shaped to scan for blindly, so
+  // they only count right after a code keyword — and must carry at least one
+  // digit, which is what separates a real code from the ordinary prose that
+  // follows "code:" ("code: please check ..."). Pure-letter codes are rare
+  // enough that accepting them would cost more in false positives than it wins.
+  const keyed = s.matchAll(_ALNUM_CODE_RE);
+  for (const m of keyed) {
+    const token = m[1];
+    if (!/\d/.test(token) || !/[A-Za-z]/.test(token)) continue; // digit-only handled above
+    push(token);
+  }
   return out;
 }
 
