@@ -3,6 +3,7 @@
 const child_process = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { runMcpSmokeTest } = require("./mcp_smoke_test");
 
 function platformPackage() {
   const platform = process.platform;
@@ -114,6 +115,12 @@ function main() {
   run("pnpm", ["-C", root, "install"]);
   run("pnpm", ["-C", root, "test"]);
   ensureBinary(entry, target, outBin, root);
+
+  // 真的把二进制跑起来，走一遍 MCP initialize + tools/list 再放行。
+  // runPkgStrict 只能拦住 pkg 自己报出来的 "Cannot find module" 警告；
+  // #22 那种发出去才发现起不来的事故，只有端到端启动一次才拦得住。
+  const smoke = runMcpSmokeTest(outBin);
+  console.log(`MCP smoke test passed: ${smoke.toolCount} tools`);
 
   const platformPkgDir = path.join(__dirname, "..", "mailbox-cli", "packages", pkgName);
   const binDir = path.join(platformPkgDir, "bin");
